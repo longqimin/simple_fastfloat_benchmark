@@ -1,19 +1,19 @@
 
 #include "absl/strings/charconv.h"
 #include "absl/strings/numbers.h"
+#include "fast_double_parser.h"
 #include "fast_float/fast_float.h"
 
 #ifdef ENABLE_RYU
 #include "ryu_parse.h"
 #endif
 
-
-#include "double-conversion/ieee.h"
 #include "double-conversion/double-conversion.h"
+#include "double-conversion/ieee.h"
 
 #define IEEE_8087
 #include "cxxopts.hpp"
-#if defined(__linux__) || (__APPLE__ &&  __aarch64__)
+#if defined(__linux__) || (__APPLE__ && __aarch64__)
 #define USING_COUNTERS
 #include "event_counter.h"
 #endif
@@ -31,12 +31,12 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <locale.h>
 #include <random>
 #include <sstream>
 #include <stdio.h>
 #include <string>
 #include <vector>
-#include <locale.h>
 
 #include "random_generators.h"
 
@@ -86,7 +86,7 @@ double findmax_netlib(std::vector<std::string> &s) {
     char *pr = (char *)st.data();
     x = netlib_strtod(st.data(), &pr);
     if (pr == st.data()) {
-      throw std::runtime_error(std::string("bug in findmax_netlib ")+st);
+      throw std::runtime_error(std::string("bug in findmax_netlib ") + st);
     }
     answer = answer > x ? answer : x;
   }
@@ -101,7 +101,8 @@ double findmax_ryus2d(std::vector<std::string> &s) {
     // Ryu does not track character consumption (boo), but we can at least...
     Status stat = s2d(st.data(), &x);
     if (stat != SUCCESS) {
-      throw std::runtime_error(std::string("bug in findmax_ryus2d ")+st + " " + std::to_string(stat));
+      throw std::runtime_error(std::string("bug in findmax_ryus2d ") + st +
+                               " " + std::to_string(stat));
     }
     answer = answer > x ? answer : x;
   }
@@ -162,6 +163,18 @@ double findmax_fastfloat(std::vector<std::string> &s) {
   return answer;
 }
 
+double findmax_fastdoubleparser(std::vector<std::string> &s) {
+  double answer = 0;
+  double x = 0;
+  for (std::string &st : s) {
+    const char *p = fast_double_parser::parse_number(st.data(), &x);
+    if (p == nullptr) {
+      throw std::runtime_error("bug in findmax_fastdoubleparser: " + st);
+    }
+    answer = answer > x ? answer : x;
+  }
+  return answer;
+}
 
 double findmax_absl_from_chars(std::vector<std::string> &s) {
   double answer = 0;
@@ -178,7 +191,7 @@ double findmax_absl_from_chars(std::vector<std::string> &s) {
 #ifdef USING_COUNTERS
 template <class T>
 std::vector<event_count> time_it_ns(std::vector<std::string> &lines,
-                                     T const &function, size_t repeat) {
+                                    T const &function, size_t repeat) {
   std::vector<event_count> aggregate;
   event_collector collector;
   bool printed_bug = false;
@@ -190,11 +203,12 @@ std::vector<event_count> time_it_ns(std::vector<std::string> &lines,
       printed_bug = true;
     }
     aggregate.push_back(collector.end());
- }
+  }
   return aggregate;
 }
 
-void pretty_print(double volume, size_t number_of_floats, std::string name, std::vector<event_count> events) {
+void pretty_print(double volume, size_t number_of_floats, std::string name,
+                  std::vector<event_count> events) {
   double volumeMB = volume / (1024. * 1024.);
   double average_ns{0};
   double min_ns{DBL_MAX};
@@ -202,7 +216,7 @@ void pretty_print(double volume, size_t number_of_floats, std::string name, std:
   double instructions_min{DBL_MAX};
   double cycles_avg{0};
   double instructions_avg{0};
-  for(event_count e : events) {
+  for (event_count e : events) {
     double ns = e.elapsed_ns();
     average_ns += ns;
     min_ns = min_ns < ns ? min_ns : ns;
@@ -213,33 +227,28 @@ void pretty_print(double volume, size_t number_of_floats, std::string name, std:
 
     double instructions = e.instructions();
     instructions_avg += instructions;
-    instructions_min = instructions_min < instructions ? instructions_min : instructions;
+    instructions_min =
+        instructions_min < instructions ? instructions_min : instructions;
   }
   cycles_avg /= events.size();
   instructions_avg /= events.size();
   average_ns /= events.size();
   printf("%-40s: %8.2f MB/s (+/- %.1f %%) ", name.data(),
-           volumeMB * 1000000000 / min_ns,
-           (average_ns - min_ns) * 100.0 / average_ns);
-  printf("%8.2f Mfloat/s  ", 
-           number_of_floats * 1000 / min_ns);
-  if(instructions_min > 0) {
-    printf(" %8.2f i/B %8.2f i/f (+/- %.1f %%) ", 
-           instructions_min / volume,
-           instructions_min / number_of_floats, 
+         volumeMB * 1000000000 / min_ns,
+         (average_ns - min_ns) * 100.0 / average_ns);
+  printf("%8.2f Mfloat/s  ", number_of_floats * 1000 / min_ns);
+  if (instructions_min > 0) {
+    printf(" %8.2f i/B %8.2f i/f (+/- %.1f %%) ", instructions_min / volume,
+           instructions_min / number_of_floats,
            (instructions_avg - instructions_min) * 100.0 / instructions_avg);
 
-    printf(" %8.2f c/B %8.2f c/f (+/- %.1f %%) ", 
-           cycles_min / volume,
-           cycles_min / number_of_floats, 
+    printf(" %8.2f c/B %8.2f c/f (+/- %.1f %%) ", cycles_min / volume,
+           cycles_min / number_of_floats,
            (cycles_avg - cycles_min) * 100.0 / cycles_avg);
-    printf(" %8.2f i/c ", 
-           instructions_min /cycles_min);
-    printf(" %8.2f GHz ", 
-           cycles_min / min_ns);
+    printf(" %8.2f i/c ", instructions_min / cycles_min);
+    printf(" %8.2f GHz ", cycles_min / min_ns);
   }
   printf("\n");
-
 }
 #else
 template <class T>
@@ -266,34 +275,39 @@ std::pair<double, double> time_it_ns(std::vector<std::string> &lines,
   return std::make_pair(min_value, average);
 }
 
-
-
-
-void pretty_print(double volume, size_t number_of_floats, std::string name, std::pair<double,double> result) {
+void pretty_print(double volume, size_t number_of_floats, std::string name,
+                  std::pair<double, double> result) {
   double volumeMB = volume / (1024. * 1024.);
   printf("%-40s: %8.2f MB/s (+/- %.1f %%) ", name.data(),
-           volumeMB * 1000000000 / result.first,
-           (result.second - result.first) * 100.0 / result.second);
-  printf("%8.2f Mfloat/s  ", 
-           number_of_floats * 1000 / result.first);
-  printf(" %8.2f ns/f \n", 
-           double(result.first) /number_of_floats );
+         volumeMB * 1000000000 / result.first,
+         (result.second - result.first) * 100.0 / result.second);
+  printf("%8.2f Mfloat/s  ", number_of_floats * 1000 / result.first);
+  printf(" %8.2f ns/f \n", double(result.first) / number_of_floats);
 }
-#endif 
+#endif
 void process(std::vector<std::string> &lines, size_t volume) {
   size_t repeat = 100;
   double volumeMB = volume / (1024. * 1024.);
   std::cout << "volume = " << volumeMB << " MB " << std::endl;
-  pretty_print(volume, lines.size(), "netlib", time_it_ns(lines, findmax_netlib, repeat));
-  pretty_print(volume, lines.size(), "doubleconversion", time_it_ns(lines, findmax_doubleconversion, repeat));
-  pretty_print(volume, lines.size(), "strtod", time_it_ns(lines, findmax_strtod, repeat));
+  pretty_print(volume, lines.size(), "netlib",
+               time_it_ns(lines, findmax_netlib, repeat));
+  pretty_print(volume, lines.size(), "doubleconversion",
+               time_it_ns(lines, findmax_doubleconversion, repeat));
+  pretty_print(volume, lines.size(), "strtod",
+               time_it_ns(lines, findmax_strtod, repeat));
 #ifdef ENABLE_RYU
-  pretty_print(volume, lines.size(), "ryu_parse", time_it_ns(lines, findmax_ryus2d, repeat));
+  pretty_print(volume, lines.size(), "ryu_parse",
+               time_it_ns(lines, findmax_ryus2d, repeat));
 #endif
-  pretty_print(volume, lines.size(), "abseil", time_it_ns(lines, findmax_absl_from_chars, repeat));
-  pretty_print(volume, lines.size(), "fastfloat", time_it_ns(lines, findmax_fastfloat, repeat));
+  pretty_print(volume, lines.size(), "abseil",
+               time_it_ns(lines, findmax_absl_from_chars, repeat));
+  pretty_print(volume, lines.size(), "fastfloat",
+               time_it_ns(lines, findmax_fastfloat, repeat));
+  pretty_print(volume, lines.size(), "fastdoubleparser",
+               time_it_ns(lines, findmax_fastdoubleparser, repeat));
 #ifdef FROM_CHARS_AVAILABLE_MAYBE
-  pretty_print(volume, lines.size(), "from_chars", time_it_ns(lines, findmax_from_chars, repeat));
+  pretty_print(volume, lines.size(), "from_chars",
+               time_it_ns(lines, findmax_from_chars, repeat));
 #endif
 }
 
@@ -315,18 +329,21 @@ void fileload(const char *filename) {
   process(lines, volume);
 }
 
-
-void parse_random_numbers(size_t howmany, bool concise, std::string random_model) {
+void parse_random_numbers(size_t howmany, bool concise,
+                          std::string random_model) {
   std::cout << "# parsing random numbers" << std::endl;
   std::vector<std::string> lines;
-  auto g = std::unique_ptr<string_number_generator>(get_generator_by_name(random_model));
+  auto g = std::unique_ptr<string_number_generator>(
+      get_generator_by_name(random_model));
   std::cout << "model: " << g->describe() << std::endl;
-  if(concise) { std::cout << "concise (using as few digits as possible)"  << std::endl; }
-  std::cout << "volume: "<< howmany << " floats"  << std::endl;
+  if (concise) {
+    std::cout << "concise (using as few digits as possible)" << std::endl;
+  }
+  std::cout << "volume: " << howmany << " floats" << std::endl;
   lines.reserve(howmany); // let us reserve plenty of memory.
   size_t volume = 0;
   for (size_t i = 0; i < howmany; i++) {
-    std::string line =  g->new_string(concise);
+    std::string line = g->new_string(concise);
     volume += line.size();
     lines.push_back(line);
   }
@@ -335,9 +352,10 @@ void parse_random_numbers(size_t howmany, bool concise, std::string random_model
 
 void parse_contrived(size_t howmany, const char *filename) {
   std::cout << "# parsing contrived numbers" << std::endl;
-  std::cout << "# these are contrived test cases to test specific algorithms" << std::endl;
+  std::cout << "# these are contrived test cases to test specific algorithms"
+            << std::endl;
   std::vector<std::string> lines;
-  std::cout << "volume: "<< howmany << " floats"  << std::endl;
+  std::cout << "volume: " << howmany << " floats" << std::endl;
 
   std::ifstream inputfile(filename);
   if (!inputfile) {
@@ -364,26 +382,34 @@ cxxopts::Options
 
 int main(int argc, char **argv) {
   try {
-    options.add_options()
-        ("c,concise", "Concise random floating-point strings (if not 17 digits are used)")
-        ("f,file", "File name.", cxxopts::value<std::string>()->default_value(""))
-        ("v,volume", "Volume (number of floats generated).", cxxopts::value<size_t>()->default_value("100000"))
-        ("m,model", "Random Model.", cxxopts::value<std::string>()->default_value("uniform"))
-        ("h,help","Print usage.");
+    options.add_options()(
+        "c,concise",
+        "Concise random floating-point strings (if not 17 digits are used)")(
+        "f,file", "File name.",
+        cxxopts::value<std::string>()->default_value(""))(
+        "v,volume", "Volume (number of floats generated).",
+        cxxopts::value<size_t>()->default_value("100000"))(
+        "m,model", "Random Model.",
+        cxxopts::value<std::string>()->default_value("uniform"))(
+        "h,help", "Print usage.");
     auto result = options.parse(argc, argv);
-    if(result["help"].as<bool>()) {
+    if (result["help"].as<bool>()) {
       std::cout << options.help() << std::endl;
       return EXIT_SUCCESS;
     }
     auto filename = result["file"].as<std::string>();
     if (filename.find("contrived") != std::string::npos) {
       parse_contrived(result["volume"].as<size_t>(), filename.c_str());
-      std::cout << "# You can also provide a filename (with the -f flag): it should contain one "
+      std::cout << "# You can also provide a filename (with the -f flag): it "
+                   "should contain one "
                    "string per line corresponding to a number"
                 << std::endl;
     } else if (filename.empty()) {
-      parse_random_numbers(result["volume"].as<size_t>(), result["concise"].as<bool>(), result["model"].as<std::string>());
-      std::cout << "# You can also provide a filename (with the -f flag): it should contain one "
+      parse_random_numbers(result["volume"].as<size_t>(),
+                           result["concise"].as<bool>(),
+                           result["model"].as<std::string>());
+      std::cout << "# You can also provide a filename (with the -f flag): it "
+                   "should contain one "
                    "string per line corresponding to a number"
                 << std::endl;
     } else {
