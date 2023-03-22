@@ -35,6 +35,12 @@ FetchContent_Declare(fast_float
      GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(fast_float)
 
+FetchContent_Declare(fast_double_parser
+     GIT_REPOSITORY https://github.com/lemire/fast_double_parser.git
+     GIT_TAG origin/master
+     GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(fast_double_parser)
+include_directories(${fast_double_parser_SOURCE_DIR}/include)
 
 FetchContent_Declare(doubleconversion 
      GIT_REPOSITORY https://github.com/google/double-conversion.git 
